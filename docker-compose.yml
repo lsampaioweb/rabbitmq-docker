@@ -1,0 +1,93 @@
+version: "3.9"
+
+networks:
+  reverse-proxy:
+    # Use an existing external network for reverse proxy integration
+    external: true
+
+services:
+  rabbitmq:
+    # Use the latest RabbitMQ image
+    image: "rabbitmq:latest"
+
+    # Name of the container
+    container_name: "rabbitmq"
+
+    # Restart policy to keep the container running unless explicitly stopped
+    restart: "unless-stopped"
+
+    environment:
+      # Default RabbitMQ username
+      - "RABBITMQ_DEFAULT_USER=admin"
+
+      # Default RabbitMQ password from environment variable
+      - "RABBITMQ_DEFAULT_PASS=${RABBITMQ_ROOT_PASSWORD}"
+
+    volumes:
+      # Mount timezone and localtime for consistent time settings
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+
+      # Mount certificates directory for SSL/TLS (for UI or RabbitMQ if uncommented)
+      # - "./certificates/:/etc/rabbitmq/certificates/"
+
+      # Mount configuration files directory for custom RabbitMQ configurations
+      - "./config/:/etc/rabbitmq/"
+
+      # Mount RabbitMQ data directory to persist RabbitMQ data
+      - "./data:/var/lib/rabbitmq"
+
+      # Mount RabbitMQ log directory for log files
+      - "./log:/var/log/rabbitmq"
+
+    networks:
+      # Connect the RabbitMQ container to the reverse-proxy network
+      - "reverse-proxy"
+
+    labels:
+      # Enable Traefik for this service
+      - "traefik.enable=true"
+
+      # Traefik TCP labels for RabbitMQ main port
+      # Define entrypoint for RabbitMQ
+      - "traefik.tcp.routers.rabbitmq.entrypoints=rabbitmq"
+      # Enable TLS for RabbitMQ
+      - "traefik.tcp.routers.rabbitmq.tls=true"
+      # Route based on SNI host
+      - "traefik.tcp.routers.rabbitmq.rule=HostSNI(`edge-rabbitmq.lan.homelab`)"
+      # Define the service for RabbitMQ
+      - "traefik.tcp.routers.rabbitmq.service=rabbitmq"
+      # Set RabbitMQ service port
+      - "traefik.tcp.services.rabbitmq.loadbalancer.server.port=5672"
+
+      # Traefik HTTP labels for RabbitMQ management UI
+      # Define entrypoint for the RabbitMQ UI
+      - "traefik.http.routers.rabbitmq-ui.entrypoints=websecure"
+      # Enable TLS for RabbitMQ UI
+      - "traefik.http.routers.rabbitmq-ui.tls=true"
+      # Route based on host
+      - "traefik.http.routers.rabbitmq-ui.rule=Host(`edge-rabbitmq.lan.homelab`)"
+      # Define the service for RabbitMQ UI
+      - "traefik.http.routers.rabbitmq-ui.service=rabbitmq-ui"
+      # Set RabbitMQ UI service port
+      - "traefik.http.services.rabbitmq-ui.loadbalancer.server.port=15672"
+
+    entrypoint:
+      # Override default entrypoint to run custom initialization script
+      ["/bin/bash", "/etc/rabbitmq/init.sh"]
+
+    healthcheck:
+      # Command to test RabbitMQ health
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+
+      # Time to wait for the container to start before performing health checks
+      start_period: "5s"
+
+      # Time between health checks
+      interval: "10s"
+
+      # Time to wait for a health check to complete
+      timeout: "2s"
+
+      # Number of retries before considering the container unhealthy
+      retries: 2
